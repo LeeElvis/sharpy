@@ -28,14 +28,14 @@ u_inf = 25
 rho = 0.08991
 
 # trim sigma = 1.5
-alpha = 1.24473127e-1
-beta = -4.44309e-7
-roll = 1.25903870e-5
+alpha = 7.886361372051909*np.pi/180
+beta = 0
+roll = 0
 gravity = 'on'
-cs_deflection = -5.38020751e-2
-rudder_deflection = 7.7593896e-5
-thrust = 8.02637032
-sigma = 1.5
+cs_deflection = -2.278574304400197*np.pi/180
+rudder_deflection = 0
+thrust = 7.127571
+sigma = 40
 lambda_dihedral = 20*np.pi/180
 # trim sigma = 100
 # alpha = 8.17774068993*np.pi/180
@@ -714,7 +714,7 @@ def generate_solver_file():
                                   'n_time_steps': n_tstep,
                                   'dt': dt,
                                   'include_unsteady_force_contribution': 'off',
-                                  'postprocessors': ['BeamLoads', 'StallCheck', 'BeamPlot', 'AerogridPlot', 'CreateSnapshot'],
+                                  'postprocessors': ['BeamLoads', 'StallCheck', 'BeamPlot', 'AerogridPlot'],
                                   'postprocessors_settings': {'BeamLoads': {'folder': route + '/output/',
                                                                             'csv_output': 'off'},
                                                               'StallCheck': {'output_degrees': True,

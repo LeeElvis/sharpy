@@ -104,6 +104,7 @@ class NonLinearDynamicCoupledStep(BaseSolver):
         applied_forces = self.data.structure.nodal_b_for_2_a_for(step.steady_applied_forces,
                                                                  step)
 
+
         applied_forces_copy = applied_forces.copy()
         gravity_forces_copy = step.gravity_forces.copy()
         for i_node in range(self.data.structure.num_node):

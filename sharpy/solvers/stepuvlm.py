@@ -115,6 +115,12 @@ class StepUvlm(BaseSolver):
                             self.settings,
                             convect_wake=convect_wake,
                             dt=dt)
+
+        # print('stepuvlm: Printing the circulations to a file')
+        # np.savetxt('unsteady_gamma0', aero_tstep.gamma[0])
+        # np.savetxt('unsteady_gamma1', aero_tstep.gamma[1])
+        # np.savetxt('unsteady_aero_forces02', aero_tstep.forces[0][2, ...])
+        # quit()
         # print('current step max unsforce: %f' % aero_tstep.dynamic_forces[0].max())
 
         # calculate unsteady (added mass) forces:

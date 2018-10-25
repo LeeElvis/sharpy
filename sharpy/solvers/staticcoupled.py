@@ -105,35 +105,42 @@ class StaticCoupled(BaseSolver):
 
                 # run aero
                 self.data = self.aero_solver.run()
+                #
+                # self.data.structure.timestep_info[self.data.ts].steady_applied_forces.fill(0.0)
+                # # map force
+                # struct_forces = mapping.aero2struct_force_mapping(
+                #     self.data.aero.timestep_info[self.data.ts].forces,
+                #     self.data.aero.struct2aero_mapping,
+                #     self.data.aero.timestep_info[self.data.ts].zeta,
+                #     self.data.structure.timestep_info[self.data.ts].pos,
+                #     self.data.structure.timestep_info[self.data.ts].psi,
+                #     self.data.structure.node_master_elem,
+                #     self.data.structure.master,
+                #     self.data.structure.timestep_info[self.data.ts].cag())
+                mapping.map_forces(self.data.structure,
+                                   self.data.aero,
+                                   self.data.aero.timestep_info[self.data.ts],
+                                   self.data.structure.timestep_info[self.data.ts],
+                                   unsteady=False)
 
-                # map force
-                struct_forces = mapping.aero2struct_force_mapping(
-                    self.data.aero.timestep_info[self.data.ts].forces,
-                    self.data.aero.struct2aero_mapping,
-                    self.data.aero.timestep_info[self.data.ts].zeta,
-                    self.data.structure.timestep_info[self.data.ts].pos,
-                    self.data.structure.timestep_info[self.data.ts].psi,
-                    self.data.structure.node_master_elem,
-                    self.data.structure.master,
-                    self.data.structure.timestep_info[self.data.ts].cag())
-
-                if not self.settings['relaxation_factor'].value == 0.:
-                    if i_iter == 0:
-                        self.previous_force = struct_forces.copy()
-
-                    temp = struct_forces.copy()
-                    struct_forces = ((1.0 - self.settings['relaxation_factor'].value)*struct_forces +
-                                     self.settings['relaxation_factor'].value*self.previous_force)
-                    self.previous_force = temp
+                # todo no relaxation for now
+                # if not self.settings['relaxation_factor'].value == 0.:
+                #     if i_iter == 0:
+                #         self.previous_force = struct_forces.copy()
+                #
+                #     temp = struct_forces.copy()
+                #     struct_forces = ((1.0 - self.settings['relaxation_factor'].value)*struct_forces +
+                #                      self.settings['relaxation_factor'].value*self.previous_force)
+                #     self.previous_force = temp
 
                 # copy force in beam
-                old_g = self.structural_solver.settings['gravity'].value
-                self.structural_solver.settings['gravity'] = old_g*load_step_multiplier
-                temp1 = load_step_multiplier*(struct_forces + self.data.structure.ini_info.steady_applied_forces)
-                self.data.structure.timestep_info[self.data.ts].steady_applied_forces[:] = temp1
+                # old_g = self.structural_solver.settings['gravity'].value
+                # self.structural_solver.settings['gravity'] = old_g*load_step_multiplier
+                # temp1 = load_step_multiplier*(struct_forces + self.data.structure.ini_info.steady_applied_forces)
+                # self.data.structure.timestep_info[self.data.ts].steady_applied_forces[:] = temp1
                 # run beam
                 self.data = self.structural_solver.run()
-                self.structural_solver.settings['gravity'] = ct.c_double(old_g)
+                # self.structural_solver.settings['gravity'] = ct.c_double(old_g)
 
                 # update grid
                 self.aero_solver.update_step()

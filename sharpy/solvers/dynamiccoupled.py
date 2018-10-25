@@ -163,14 +163,11 @@ class DynamicCoupled(BaseSolver):
         self.data.ts = 0
 
     def run(self):
-        # previous_kstep = self.data.structure.timestep_info[-1].copy()
         # dynamic simulations start at tstep == 1, 0 is reserved for the initial state
         for self.data.ts in range(len(self.data.structure.timestep_info),
                                   self.settings['n_time_steps'].value + len(self.data.structure.timestep_info)):
-            # aero_kstep = self.data.aero.timestep_info[-1].copy()
             structural_kstep = self.data.structure.timestep_info[-1].copy()
 
-            # previous_kstep = self.data.structure.timestep_info[-1].copy()
             k = 0
             for k in range(self.settings['fsi_substeps'].value + 1):
                 if k == self.settings['fsi_substeps'].value and not self.settings['fsi_substeps'] == 0:
@@ -199,9 +196,14 @@ class DynamicCoupled(BaseSolver):
                 force_coeff = 0.0
                 if self.settings['include_unsteady_force_contribution']:
                     force_coeff = -1.0
-                self.map_forces(aero_kstep,
-                                structural_kstep,
-                                force_coeff)
+                # self.map_forces(aero_kstep,
+                #                 structural_kstep,
+                #                 force_coeff)
+                mapping.map_forces(self.data.structure,
+                                   self.data.aero,
+                                   aero_kstep,
+                                   structural_kstep,
+                                   unsteady=False)
 
                 # relaxation
                 relax_factor = self.relaxation_factor(k)
@@ -274,38 +276,38 @@ class DynamicCoupled(BaseSolver):
 
         return False
 
-    def map_forces(self, aero_kstep, structural_kstep, unsteady_forces_coeff=1.0):
-        # set all forces to 0
-        structural_kstep.steady_applied_forces.fill(0.0)
-        structural_kstep.unsteady_applied_forces.fill(0.0)
-
-        # aero forces to structural forces
-        struct_forces = mapping.aero2struct_force_mapping(
-            aero_kstep.forces,
-            self.data.aero.struct2aero_mapping,
-            aero_kstep.zeta,
-            structural_kstep.pos,
-            structural_kstep.psi,
-            self.data.structure.node_master_elem,
-            self.data.structure.master,
-            structural_kstep.cag())
-        dynamic_struct_forces = unsteady_forces_coeff*mapping.aero2struct_force_mapping(
-            aero_kstep.dynamic_forces,
-            self.data.aero.struct2aero_mapping,
-            aero_kstep.zeta,
-            structural_kstep.pos,
-            structural_kstep.psi,
-            self.data.structure.node_master_elem,
-            self.data.structure.master,
-            structural_kstep.cag())
-
-        # prescribed forces + aero forces
-        structural_kstep.steady_applied_forces = (
-            (struct_forces + self.data.structure.ini_info.steady_applied_forces).
-            astype(dtype=ct.c_double, order='F', copy=True))
-        structural_kstep.unsteady_applied_forces = (
-            (dynamic_struct_forces + self.data.structure.dynamic_input[max(self.data.ts - 1, 0)]['dynamic_forces']).
-            astype(dtype=ct.c_double, order='F', copy=True))
+    # def map_forces(self, aero_kstep, structural_kstep, unsteady_forces_coeff=1.0):
+    #     # set all forces to 0
+    #     structural_kstep.steady_applied_forces.fill(0.0)
+    #     structural_kstep.unsteady_applied_forces.fill(0.0)
+    #
+    #     # aero forces to structural forces
+    #     struct_forces = mapping.aero2struct_force_mapping(
+    #         aero_kstep.forces,
+    #         self.data.aero.struct2aero_mapping,
+    #         aero_kstep.zeta,
+    #         structural_kstep.pos,
+    #         structural_kstep.psi,
+    #         self.data.structure.node_master_elem,
+    #         self.data.structure.master,
+    #         structural_kstep.cag())
+    #     dynamic_struct_forces = unsteady_forces_coeff*mapping.aero2struct_force_mapping(
+    #         aero_kstep.dynamic_forces,
+    #         self.data.aero.struct2aero_mapping,
+    #         aero_kstep.zeta,
+    #         structural_kstep.pos,
+    #         structural_kstep.psi,
+    #         self.data.structure.node_master_elem,
+    #         self.data.structure.master,
+    #         structural_kstep.cag())
+    #
+    #     # prescribed forces + aero forces
+    #     structural_kstep.steady_applied_forces = (
+    #         (struct_forces + self.data.structure.ini_info.steady_applied_forces).
+    #         astype(dtype=ct.c_double, order='F', copy=True))
+    #     structural_kstep.unsteady_applied_forces = (
+    #         (dynamic_struct_forces + self.data.structure.dynamic_input[max(self.data.ts - 1, 0)]['dynamic_forces']).
+    #         astype(dtype=ct.c_double, order='F', copy=True))
 
     def relaxation_factor(self, k):
         initial = self.settings['relaxation_factor'].value
