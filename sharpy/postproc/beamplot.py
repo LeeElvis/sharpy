@@ -11,29 +11,48 @@ import sharpy.utils.algebra as algebra
 
 @solver
 class BeamPlot(BaseSolver):
+    """
+    Plots beam to Paraview format
+    """
     solver_id = 'BeamPlot'
+    solver_classification = 'post-processor'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+
+    settings_types['folder'] = 'str'
+    settings_default['folder'] = './output'
+    settings_description['folder'] = 'Output folder path'
+
+    settings_types['include_rbm'] = 'bool'
+    settings_default['include_rbm'] = True
+    settings_description['include_rbm'] = 'Include frame of reference rigid body motion'
+
+    settings_types['include_FoR'] = 'bool'
+    settings_default['include_FoR'] = False
+    settings_description['include_FoR'] = 'Include frame of reference variables'
+
+    settings_types['include_applied_forces'] = 'bool'
+    settings_default['include_applied_forces'] = True
+    settings_description['include_applied_forces'] = 'Write beam applied forces'
+
+    settings_types['include_applied_moments'] = 'bool'
+    settings_default['include_applied_moments'] = True
+    settings_description['include_applied_moments'] = 'Write beam applied moments'
+
+    settings_types['name_prefix'] = 'str'
+    settings_default['name_prefix'] = ''
+    settings_description['name_prefix'] = 'Name prefix for files'
+
+    settings_types['output_rbm'] = 'bool'
+    settings_default['output_rbm'] = True
+    settings_description['output_rbm'] = 'Write ``csv`` file with rigid body motion data'
+
+    settings_table = settings.SettingsTable()
+    __doc__ += settings_table.generate(settings_types, settings_default, settings_description)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['folder'] = 'str'
-        self.settings_default['folder'] = './output'
-
-        self.settings_types['include_rbm'] = 'bool'
-        self.settings_default['include_rbm'] = True
-
-        self.settings_types['include_applied_forces'] = 'bool'
-        self.settings_default['include_applied_forces'] = True
-
-        self.settings_types['include_applied_moments'] = 'bool'
-        self.settings_default['include_applied_moments'] = True
-
-        self.settings_types['name_prefix'] = 'str'
-        self.settings_default['name_prefix'] = ''
-
-        self.settings_types['output_rbm'] = 'bool'
-        self.settings_default['output_rbm'] = True
 
         self.settings = None
         self.data = None
@@ -58,6 +77,10 @@ class BeamPlot(BaseSolver):
                          self.settings['name_prefix'] +
                          'beam_' +
                          self.data.settings['SHARPy']['case'])
+        self.filename_for = (self.folder +
+                         self.settings['name_prefix'] +
+                         'for_' +
+                         self.data.settings['SHARPy']['case'])
 
     def run(self, online=False):
         self.plot(online)
@@ -80,9 +103,13 @@ class BeamPlot(BaseSolver):
         if not online:
             for it in range(len(self.data.structure.timestep_info)):
                 self.write_beam(it)
+                if self.settings['include_FoR']:
+                    self.write_for(it)
         else:
             it = len(self.data.structure.timestep_info) - 1
             self.write_beam(it)
+            if self.settings['include_FoR']:
+                self.write_for(it)
 
     def write_beam(self, it):
         it_filename = (self.filename +
@@ -103,6 +130,9 @@ class BeamPlot(BaseSolver):
         app_forces = np.zeros((num_nodes, 3))
         app_moment = np.zeros((num_nodes, 3))
 
+        forces_constraints_nodes = np.zeros((num_nodes, 3))
+        moments_constraints_nodes = np.zeros((num_nodes, 3))
+
         # aero2inertial rotation
         aero2inertial = self.data.structure.timestep_info[it].cga()
 
@@ -113,6 +143,7 @@ class BeamPlot(BaseSolver):
         with_gravity = False
         try:
             gravity_forces = self.data.structure.timestep_info[it].gravity_forces[:]
+            gravity_forces_g = np.zeros_like(gravity_forces)
             with_gravity = True
         except AttributeError:
             pass
@@ -194,11 +225,17 @@ class BeamPlot(BaseSolver):
                                            np.dot(cab,
                                                   self.data.structure.timestep_info[it].steady_applied_forces[i_node, 3:6]+
                                                   self.data.structure.timestep_info[it].unsteady_applied_forces[i_node, 3:6]))
+            forces_constraints_nodes[i_node, :] = np.dot(aero2inertial,
+                                           np.dot(cab,
+                                                  self.data.structure.timestep_info[it].forces_constraints_nodes[i_node, 0:3]))
+            moments_constraints_nodes[i_node, :] = np.dot(aero2inertial,
+                                           np.dot(cab,
+                                                  self.data.structure.timestep_info[it].forces_constraints_nodes[i_node, 3:6]))
 
             if with_gravity:
-                gravity_forces[i_node, 0:3] = np.dot(aero2inertial,
+                gravity_forces_g[i_node, 0:3] = np.dot(aero2inertial,
                                                      gravity_forces[i_node, 0:3])
-                gravity_forces[i_node, 3:6] = np.dot(aero2inertial,
+                gravity_forces_g[i_node, 3:6] = np.dot(aero2inertial,
                                                      gravity_forces[i_node, 3:6])
 
         for i_elem in range(num_elem):
@@ -242,18 +279,24 @@ class BeamPlot(BaseSolver):
             point_vector_counter += 1
             ug.point_data.add_array(app_forces, 'vector')
             ug.point_data.get_array(point_vector_counter).name = 'app_forces'
+            point_vector_counter += 1
+            ug.point_data.add_array(forces_constraints_nodes, 'vector')
+            ug.point_data.get_array(point_vector_counter).name = 'forces_constraints_nodes'
             if with_gravity:
                 point_vector_counter += 1
-                ug.point_data.add_array(gravity_forces[:, 0:3], 'vector')
+                ug.point_data.add_array(gravity_forces_g[:, 0:3], 'vector')
                 ug.point_data.get_array(point_vector_counter).name = 'gravity_forces'
 
         if self.settings['include_applied_moments']:
             point_vector_counter += 1
             ug.point_data.add_array(app_moment, 'vector')
             ug.point_data.get_array(point_vector_counter).name = 'app_moments'
+            point_vector_counter += 1
+            ug.point_data.add_array(moments_constraints_nodes, 'vector')
+            ug.point_data.get_array(point_vector_counter).name = 'moments_constraints_nodes'
             if with_gravity:
                 point_vector_counter += 1
-                ug.point_data.add_array(gravity_forces[:, 3:6], 'vector')
+                ug.point_data.add_array(gravity_forces_g[:, 3:6], 'vector')
                 ug.point_data.get_array(point_vector_counter).name = 'gravity_moments'
         if with_postproc_node:
             for k in postproc_node_vector:
@@ -268,3 +311,41 @@ class BeamPlot(BaseSolver):
 
         write_data(ug, it_filename)
 
+    def write_for(self, it):
+        it_filename = (self.filename_for +
+                       '%06u' % it)
+
+        forces_constraints_FoR = np.zeros((self.data.structure.num_bodies, 3))
+        moments_constraints_FoR = np.zeros((self.data.structure.num_bodies, 3))
+        # TODO: what should I do with the forces of the quaternion?
+
+        # aero2inertial rotation
+        aero2inertial = self.data.structure.timestep_info[it].cga()
+
+        # coordinates of corners
+        FoR_coords = np.zeros((self.data.structure.num_bodies, 3))
+        if self.settings['include_rbm']:
+            offset = np.zeros((3,))
+        else:
+            offset = self.data.structure.timestep_info[it].mb_FoR_pos[0, 0:3]
+        for ibody in range(self.data.structure.num_bodies):
+            FoR_coords[ibody, :] = self.data.structure.timestep_info[it].mb_FoR_pos[ibody, 0:3] - offset
+
+        for ibody in range(self.data.structure.num_bodies):
+            forces_constraints_FoR[ibody, :] = np.dot(aero2inertial,
+                                                  self.data.structure.timestep_info[it].forces_constraints_FoR[ibody, 0:3])
+            moments_constraints_FoR[ibody, :] = np.dot(aero2inertial,
+                                                  self.data.structure.timestep_info[it].forces_constraints_FoR[ibody, 3:6])
+
+        FoRmesh = tvtk.PolyData()
+        FoRmesh.points = FoR_coords
+        for_vector_counter = -1
+        for_vector_counter += 1
+        FoRmesh.point_data.add_array(forces_constraints_FoR , 'vector')
+        FoRmesh.point_data.get_array(for_vector_counter).name = 'forces_constraints_FoR'
+
+        for_vector_counter += 1
+        FoRmesh.point_data.add_array(moments_constraints_FoR , 'vector')
+        FoRmesh.point_data.get_array(for_vector_counter).name = 'moments_constraints_FoR'
+
+        write_data(FoRmesh, it_filename)

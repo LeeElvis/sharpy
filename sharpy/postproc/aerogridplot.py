@@ -13,42 +13,56 @@ import sharpy.aero.utils.uvlmlib as uvlmlib
 
 @solver
 class AerogridPlot(BaseSolver):
+    """
+    Aerodynamic Grid Plotter
+
+    """
     solver_id = 'AerogridPlot'
+    solver_classification = 'post-processor'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+
+    settings_types['folder'] = 'str'
+    settings_default['folder'] = './output'
+    settings_description['folder'] = 'Output folder'
+
+    settings_types['include_rbm'] = 'bool'
+    settings_default['include_rbm'] = True
+
+    settings_types['include_forward_motion'] = 'bool'
+    settings_default['include_forward_motion'] = False
+
+    settings_types['include_applied_forces'] = 'bool'
+    settings_default['include_applied_forces'] = True
+
+    settings_types['include_unsteady_applied_forces'] = 'bool'
+    settings_default['include_unsteady_applied_forces'] = False
+
+    settings_types['minus_m_star'] = 'int'
+    settings_default['minus_m_star'] = 0
+
+    settings_types['name_prefix'] = 'str'
+    settings_default['name_prefix'] = ''
+    settings_description['name_prefix'] = 'Prefix to add to file name'
+
+    settings_types['u_inf'] = 'float'
+    settings_default['u_inf'] = 0.
+
+    settings_types['dt'] = 'float'
+    settings_default['dt'] = 0.
+
+    settings_types['include_velocities'] = 'bool'
+    settings_default['include_velocities'] = False
+
+    settings_types['num_cores'] = 'int'
+    settings_default['num_cores'] = 1
+
+    table = settings.SettingsTable()
+    __doc__ += table.generate(settings_types, settings_default, settings_description)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['folder'] = 'str'
-        self.settings_default['folder'] = './output'
-
-        self.settings_types['include_rbm'] = 'bool'
-        self.settings_default['include_rbm'] = True
-
-        self.settings_types['include_forward_motion'] = 'bool'
-        self.settings_default['include_forward_motion'] = False
-
-        self.settings_types['include_applied_forces'] = 'bool'
-        self.settings_default['include_applied_forces'] = True
-
-        self.settings_types['include_unsteady_applied_forces'] = 'bool'
-        self.settings_default['include_unsteady_applied_forces'] = False
-
-        self.settings_types['minus_m_star'] = 'int'
-        self.settings_default['minus_m_star'] = 0
-
-        self.settings_types['name_prefix'] = 'str'
-        self.settings_default['name_prefix'] = ''
-
-        self.settings_types['u_inf'] = 'float'
-        self.settings_default['u_inf'] = 0.
-
-        self.settings_types['dt'] = 'float'
-        self.settings_default['dt'] = 0.
-
-        self.settings_types['include_velocities'] = 'bool'
-        self.settings_default['include_velocities'] = False
-
         self.settings = None
         self.data = None
 
@@ -161,8 +175,6 @@ class AerogridPlot(BaseSolver):
                         u_inf[node_counter, :] = self.data.aero.timestep_info[self.ts].u_ext[i_surf][0:3, i_m, i_n]
                     except AttributeError:
                         pass
-                    if self.settings['include_velocities']:
-                        vel[node_counter, :] = uvlmlib.uvlm_calculate_total_induced_velocity_at_point(self.data.aero.timestep_info[self.ts],coords[node_counter, :])
                     if i_n < dims[1] and i_m < dims[0]:
                         counter += 1
                     else:
@@ -183,6 +195,11 @@ class AerogridPlot(BaseSolver):
                         incidence_angle[counter] = \
                             self.data.aero.timestep_info[self.ts].postproc_cell['incidence_angle'][i_surf][i_m, i_n]
 
+            if self.settings['include_velocities']:
+                vel = uvlmlib.uvlm_calculate_total_induced_velocity_at_points(self.data.aero.timestep_info[self.ts],
+                                                                                              coords,
+                                                                                              self.data.aero.timestep_info[self.ts].for_pos,
+                                                                                              self.settings['numcores'])
 
             ug = tvtk.UnstructuredGrid(points=coords)
             ug.set_cells(tvtk.Quad().cell_type, conn)

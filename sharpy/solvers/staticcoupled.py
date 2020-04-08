@@ -1,5 +1,5 @@
 import ctypes as ct
-
+import sys
 import numpy as np
 
 import sharpy.aero.utils.mapping as mapping
@@ -12,38 +12,57 @@ import sharpy.utils.algebra as algebra
 
 @solver
 class StaticCoupled(BaseSolver):
+    """
+    This class is the main FSI driver for static simulations.
+    It requires a ``structural_solver`` and a ``aero_solver`` to be defined.
+    """
     solver_id = 'StaticCoupled'
+    solver_classification = 'Coupled'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+
+    settings_types['print_info'] = 'bool'
+    settings_default['print_info'] = True
+    settings_description['print_info'] = 'Write status to screen'
+
+    settings_types['structural_solver'] = 'str'
+    settings_default['structural_solver'] = None
+    settings_description['structural_solver'] = 'Structural solver to use in the coupled simulation'
+
+    settings_types['structural_solver_settings'] = 'dict'
+    settings_default['structural_solver_settings'] = None
+    settings_description['structural_solver_settings'] = 'Dictionary of settings for the structural solver'
+
+    settings_types['aero_solver'] = 'str'
+    settings_default['aero_solver'] = None
+    settings_description['aero_solver'] = 'Aerodynamic solver to use in the coupled simulation'
+
+    settings_types['aero_solver_settings'] = 'dict'
+    settings_default['aero_solver_settings'] = None
+    settings_description['aero_solver_settings'] = 'Dictionary of settings for the aerodynamic solver'
+
+    settings_types['max_iter'] = 'int'
+    settings_default['max_iter'] = 100
+    settings_description['max_iter'] = 'Max iterations in the FSI loop'
+
+    settings_types['n_load_steps'] = 'int'
+    settings_default['n_load_steps'] = 0
+    settings_description['n_load_steps'] = 'Length of ramp for forces and gravity during FSI iteration'
+
+    settings_types['tolerance'] = 'float'
+    settings_default['tolerance'] = 1e-5
+    settings_description['tolerance'] = 'Convergence threshold for the FSI loop'
+
+    settings_types['relaxation_factor'] = 'float'
+    settings_default['relaxation_factor'] = 0.
+    settings_description['relaxation_factor'] = 'Relaxation parameter in the FSI iteration. 0 is no relaxation and -> 1 is very relaxed'
+
+    settings_table = settings.SettingsTable()
+    __doc__ += settings_table.generate(settings_types, settings_default, settings_description)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['print_info'] = 'bool'
-        self.settings_default['print_info'] = True
-
-        self.settings_types['structural_solver'] = 'str'
-        self.settings_default['structural_solver'] = None
-
-        self.settings_types['structural_solver_settings'] = 'dict'
-        self.settings_default['structural_solver_settings'] = None
-
-        self.settings_types['aero_solver'] = 'str'
-        self.settings_default['aero_solver'] = None
-
-        self.settings_types['aero_solver_settings'] = 'dict'
-        self.settings_default['aero_solver_settings'] = None
-
-        self.settings_types['max_iter'] = 'int'
-        self.settings_default['max_iter'] = 100
-
-        self.settings_types['n_load_steps'] = 'int'
-        self.settings_default['n_load_steps'] = 1
-
-        self.settings_types['tolerance'] = 'float'
-        self.settings_default['tolerance'] = 1e-5
-
-        self.settings_types['relaxation_factor'] = 'float'
-        self.settings_default['relaxation_factor'] = 0.
 
         self.data = None
         self.settings = None
@@ -51,6 +70,8 @@ class StaticCoupled(BaseSolver):
         self.aero_solver = None
 
         self.previous_force = None
+
+        self.residual_table = None
 
     def initialise(self, data, input_dict=None):
         self.data = data
@@ -60,11 +81,20 @@ class StaticCoupled(BaseSolver):
             self.settings = input_dict
         settings.to_custom_types(self.settings, self.settings_types, self.settings_default)
 
+        self.print_info = self.settings['print_info']
+
         self.structural_solver = solver_interface.initialise_solver(self.settings['structural_solver'])
         self.structural_solver.initialise(self.data, self.settings['structural_solver_settings'])
         self.aero_solver = solver_interface.initialise_solver(self.settings['aero_solver'])
         self.aero_solver.initialise(self.structural_solver.data, self.settings['aero_solver_settings'])
         self.data = self.aero_solver.data
+
+        if self.print_info:
+            self.residual_table = cout.TablePrinter(9, 8, ['g', 'g', 'f', 'f', 'f', 'f', 'f', 'f', 'f'])
+            self.residual_table.field_length[0] = 3
+            self.residual_table.field_length[1] = 3
+            self.residual_table.field_length[2] = 10
+            self.residual_table.print_header(['iter', 'step', 'log10(res)', 'Fx', 'Fy', 'Fz', 'Mx', 'My', 'Mz'])
 
     def increase_ts(self):
         self.data.ts += 1
@@ -100,9 +130,6 @@ class StaticCoupled(BaseSolver):
                 self.increase_ts()
 
             for i_iter in range(self.settings['max_iter'].value):
-                if self.settings['print_info'].value:
-                    cout.cout_wrap('i_step: %u, i_iter: %u' % (i_step, i_iter))
-
                 # run aero
                 self.data = self.aero_solver.run()
 
@@ -114,8 +141,9 @@ class StaticCoupled(BaseSolver):
                     self.data.structure.timestep_info[self.data.ts].pos,
                     self.data.structure.timestep_info[self.data.ts].psi,
                     self.data.structure.node_master_elem,
-                    self.data.structure.master,
-                    self.data.structure.timestep_info[self.data.ts].cag())
+                    self.data.structure.connectivities,
+                    self.data.structure.timestep_info[self.data.ts].cag(),
+                    self.data.aero.aero_dict)
 
                 if not self.settings['relaxation_factor'].value == 0.:
                     if i_iter == 0:
@@ -134,6 +162,9 @@ class StaticCoupled(BaseSolver):
                 # run beam
                 self.data = self.structural_solver.run()
                 self.structural_solver.settings['gravity'] = ct.c_double(old_g)
+                (self.data.structure.timestep_info[self.data.ts].total_forces[0:3],
+                 self.data.structure.timestep_info[self.data.ts].total_forces[3:6]) = (
+                        self.extract_resultants(self.data.structure.timestep_info[self.data.ts]))
 
                 # update grid
                 self.aero_solver.update_step()
@@ -145,9 +176,6 @@ class StaticCoupled(BaseSolver):
                     self.cleanup_timestep_info()
                     break
 
-        if self.settings['print_info']:
-            resultants = self.extract_resultants()
-            cout.cout_wrap('Resultant forces and moments: ' + str(resultants))
         return self.data
 
     def convergence(self, i_iter, i_step):
@@ -160,11 +188,38 @@ class StaticCoupled(BaseSolver):
             self.initial_residual = np.linalg.norm(self.data.structure.timestep_info[self.data.ts].pos)
             self.previous_residual = self.initial_residual
             self.current_residual = self.initial_residual
+            if self.print_info:
+                forces = self.data.structure.timestep_info[self.data.ts].total_forces
+                self.residual_table.print_line([i_iter,
+                        i_step,
+                        0.0,
+                        forces[0],
+                        forces[1],
+                        forces[2],
+                        forces[3],
+                        forces[4],
+                        forces[5],
+                        ])
             return False
 
         self.current_residual = np.linalg.norm(self.data.structure.timestep_info[self.data.ts].pos)
-        if self.settings['print_info'].value:
-            cout.cout_wrap('Res = %8e' % (np.abs(self.current_residual - self.previous_residual)/self.previous_residual), 2)
+        if self.print_info:
+            forces = self.data.structure.timestep_info[self.data.ts].total_forces
+            res_print = np.NINF
+            if (np.abs(self.current_residual - self.previous_residual) >
+                sys.float_info.epsilon*10):
+                res_print = np.log10(np.abs(self.current_residual - self.previous_residual)/self.initial_residual)
+
+            self.residual_table.print_line([i_iter,
+                    i_step,
+                    res_print,
+                    forces[0],
+                    forces[1],
+                    forces[2],
+                    forces[3],
+                    forces[4],
+                    forces[5],
+                    ])
 
         if return_value is None:
             if np.abs(self.current_residual - self.previous_residual)/self.initial_residual < self.settings['tolerance'].value:

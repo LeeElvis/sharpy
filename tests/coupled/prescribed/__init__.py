@@ -1,1 +1,1 @@
-from tests.coupled.prescribed.prescribed_test import *
+import tests.coupled.prescribed.WindTurbine

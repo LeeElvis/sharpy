@@ -1,8 +1,9 @@
-import cases.templates.flying_wings as wings
 import os
-import sharpy.sharpy_main
 import numpy as np
 import unittest
+
+import cases.templates.flying_wings as wings
+import sharpy.sharpy_main
 
 
 def x_dot(x, dt, integration_order=2):
@@ -20,11 +21,13 @@ def x_dot(x, dt, integration_order=2):
     return x_dot_r
 
 
-class Test_gamma_dot(unittest.TestCase):
+class TestGammaDot(unittest.TestCase):
 
     def set_up_test_case(self, aero_type, predictor, sparse, integration_order):
 
         # aero_type = 'lin'
+        global case_name
+        case_name = 'goland_' + aero_type + '_'+'P%g_S%g_I%g' %(predictor, sparse, integration_order)
         ws = wings.Goland(M=12,
                           N=4,
                           Mstar_fact=50,
@@ -35,7 +38,7 @@ class Test_gamma_dot(unittest.TestCase):
                           physical_time=0.1,
                           n_surfaces=2,
                           route='cases',
-                          case_name='goland_' + aero_type + '_'+'P%g_S%g_I%g' %(predictor, sparse, integration_order))
+                          case_name=case_name)
 
         # Other test parameters
         ws.gust_intensity = 0.01
@@ -70,11 +73,11 @@ class Test_gamma_dot(unittest.TestCase):
                                                                                             'u_inf_direction': [1., 0.,
                                                                                                                 0.],
                                                                                             'gust_shape': 'continuous_sin',
-                                                                                            'gust_length': 2.,
-                                                                                            'gust_intensity': ws.gust_intensity
-                                                                                                              * ws.u_inf,
                                                                                             'offset': 2.,
-                                                                                            'span': ws.main_chord * ws.aspect_ratio}}
+                                                                                            'gust_parameters': {'gust_length': 2.,
+                                                                                                                'gust_intensity': ws.gust_intensity
+                                                                                                                                  * ws.u_inf,
+                                                                                                                'span': ws.main_chord * ws.aspect_ratio}}}
         else:
             ws.config['DynamicCoupled']['aero_solver'] = 'StepUvlm'
             ws.config['DynamicCoupled']['aero_solver_settings'] = {
@@ -97,7 +100,9 @@ class Test_gamma_dot(unittest.TestCase):
                 'rho': ws.rho,
                 'n_time_steps': ws.n_tstep,
                 'dt': ws.dt,
-                'gamma_dot_filtering': 0}
+                'gamma_dot_filtering': 0,
+                'track_body': True,
+                'track_body_number': -1}
             ws.config['DynamicCoupled']['include_unsteady_force_contribution'] = 'on'
         # Update settings file
         ws.config.write()
@@ -111,7 +116,7 @@ class Test_gamma_dot(unittest.TestCase):
 
         self.set_up_test_case(aero_type, predictor, sparse, integration_order)
         ws = self.ws
-        data = sharpy.sharpy_main.main(['', self.case_route + self.case_name + '.solver.txt'])
+        data = sharpy.sharpy_main.main(['', self.case_route + self.case_name + '.sharpy'])
 
         # Obtain gamma
         gamma = np.zeros((ws.n_tstep,))
@@ -133,19 +138,27 @@ class Test_gamma_dot(unittest.TestCase):
             passed_test = error_derivative < 1e-2 * np.abs(gamma_dot_at_max)
 
         if not passed_test:
-            import matplotlib.pyplot as plt
-            plt.plot(gamma_dot)
-            plt.plot(gamma_dot_fd, color='k')
-            plt.show()
+            try:
+                import matplotlib.pyplot as plt
+                plt.plot(gamma_dot)
+                plt.plot(gamma_dot_fd, color='k')
+                plt.show()
 
-            plt.plot(gamma_dot - gamma_dot_fd)
-            plt.show()
+                plt.plot(gamma_dot - gamma_dot_fd)
+                plt.show()
+            except ModuleNotFoundError:
+                import warnings
+                warnings.warn('Unable to import matplotlib, skipping plot')
 
         assert passed_test == True, \
             'Discrepancy between gamma_dot and that calculated using FD, relative difference is %.2f' % (
                     error_derivative / np.abs(gamma_dot_at_max))
 
-    def test_case(self):
+    def setUp(self):
+        pass
+
+    def test_gammadot(self):
+
         for aero_type in ['lin', 'nlin']:
             if aero_type == 'lin':
                 for predictor in [True, False]:
@@ -166,6 +179,15 @@ class Test_gamma_dot(unittest.TestCase):
 
                     self.run_test(aero_type, predictor, sparse, integration_order)
 
+    def tearDown(self):
 
-if __name__ == '__main__':
-    unittest.main()
+        solver_path = os.path.dirname(os.path.realpath(__file__))
+        # solver_path += '/'
+        # files_to_delete = [case + '.aero.h5',
+        #                    case + '.dyn.h5',
+        #                    case + '.fem.h5',
+        #                    case + '.sharpy']
+        # for f in files_to_delete:
+        #     os.remove(solver_path + f)
+
+        shutil.rmtree(solver_path + '/cases/')

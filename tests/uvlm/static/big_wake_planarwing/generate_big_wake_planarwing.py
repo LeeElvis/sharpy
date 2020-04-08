@@ -47,7 +47,7 @@ def clean_test_files():
     if os.path.isfile(aero_file_name):
         os.remove(aero_file_name)
 
-    solver_file_name = route + '/' + case_name + '.solver.txt'
+    solver_file_name = route + '/' + case_name + '.sharpy'
     if os.path.isfile(solver_file_name):
         os.remove(solver_file_name)
 
@@ -64,7 +64,7 @@ def generate_fem_file():
     y = np.zeros((num_node, ))
     z = np.zeros((num_node, ))
     # struct twist
-    structural_twist = np.zeros_like(x)
+    structural_twist = np.zeros((num_elem, 3))
     # beam number
     beam_number = np.zeros((num_elem, ), dtype=int)
     # frame of reference delta
@@ -272,7 +272,7 @@ def generate_naca_camber(M=0, P=0):
 
 def generate_solver_file(horseshoe=False):
     import sharpy.utils.algebra as algebra
-    file_name = route + '/' + case_name + '.solver.txt'
+    file_name = route + '/' + case_name + '.sharpy'
     # config = configparser.ConfigParser()
     import configobj
     config = configobj.ConfigObj()

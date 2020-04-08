@@ -1,9 +1,7 @@
-import ctypes as ct
 import numpy as np
 import os
 
 import sharpy.utils.cout_utils as cout
-from sharpy.utils.settings import str2bool
 from sharpy.utils.solver_interface import solver, BaseSolver
 import sharpy.utils.settings as settings
 import sharpy.utils.algebra as algebra
@@ -19,26 +17,54 @@ class ForcesContainer(object):
 
 @solver
 class AeroForcesCalculator(BaseSolver):
+    """AeroForcesCalculator
+
+    Calculates the total aerodynamic forces on the frame of reference ``A``.
+
+    """
     solver_id = 'AeroForcesCalculator'
+    solver_classification = 'post-processor'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+
+    settings_types['folder'] = 'str'
+    settings_default['folder'] = './output'
+    settings_description['folder'] = 'Output folder location'
+
+    settings_types['write_text_file'] = 'bool'
+    settings_default['write_text_file'] = False
+    settings_description['write_text_file'] = 'Write ``txt`` file with results'
+
+    settings_types['text_file_name'] = 'str'
+    settings_default['text_file_name'] = ''
+    settings_description['text_file_name'] = 'Text file name'
+
+    settings_types['screen_output'] = 'bool'
+    settings_default['screen_output'] = True
+    settings_description['screen_output'] = 'Show results on screen'
+
+    settings_types['unsteady'] = 'bool'
+    settings_default['unsteady'] = False
+    settings_description['unsteady'] = 'Include unsteady contributions'
+
+    settings_default['coefficients'] = False
+    settings_types['coefficients'] = 'bool'
+    settings_description['coefficients'] = 'Calculate aerodynamic coefficients'
+
+    settings_types['q_ref'] = 'float'
+    settings_default['q_ref'] = 1
+    settings_description['q_ref'] = 'Reference dynamic pressure'
+
+    settings_types['S_ref'] = 'float'
+    settings_default['S_ref'] = 1
+    settings_description['S_ref'] = 'Reference area'
+
+    settings_table = settings.SettingsTable()
+    __doc__ += settings_table.generate(settings_types, settings_default, settings_description)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['folder'] = 'str'
-        self.settings_default['folder'] = './output'
-
-        self.settings_types['write_text_file'] = 'bool'
-        self.settings_default['write_text_file'] = False
-
-        self.settings_types['text_file_name'] = 'str'
-        self.settings_default['text_file_name'] = ''
-
-        self.settings_types['screen_output'] = 'bool'
-        self.settings_default['screen_output'] = True
-
-        self.settings_types['unsteady'] = 'bool'
-        self.settings_default['unsteady'] = False
 
         self.settings = None
         self.data = None
@@ -95,23 +121,50 @@ class AeroForcesCalculator(BaseSolver):
                 self.data.aero.timestep_info[self.ts].body_steady_forces[i_surf, 0:3] = np.dot(rot.T, total_steady_force)
                 self.data.aero.timestep_info[self.ts].body_unsteady_forces[i_surf, 0:3] = np.dot(rot.T, total_unsteady_force)
 
+    def calculate_coefficients(self, fx, fy, fz):
+        qS = self.settings['q_ref'].value * self.settings['S_ref'].value
+        return fx/qS, fy/qS, fz/qS
+
     def screen_output(self):
         line = ''
         cout.cout_wrap.print_separator()
         # output header
-        line = "{0:5s} | {1:10s} | {2:10s} | {3:10s}".format(
-            'tstep', '  fx_g', '  fy_g', '  fz_g')
-        cout.cout_wrap(line, 1)
-        for self.ts in range(self.ts_max):
-            line = "{0:5d} | {1: 8.3e} | {2: 8.3e} | {3: 8.3e}".format(
-                self.ts,
-                (np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 0], 0) +
-                 np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 0], 0)),
-                (np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 1], 0) +
-                 np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 1], 0)),
-                (np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 2], 0) +
-                 np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 2], 0)))
+        if self.settings['coefficients']:
+            line = "{0:5s} | {1:10s} | {2:10s} | {3:10s} | {4:10s} | {5:10s} | {6:10s}".format(
+                'tstep', '  fx_g', '  fy_g', '  fz_g', '  Cfx_g', '  Cfy_g', '  Cfz_g')
             cout.cout_wrap(line, 1)
+            for self.ts in range(self.ts_max):
+                fx = np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 0], 0) + \
+                     np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 0], 0)
+
+                fy = np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 1], 0) + \
+                     np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 1], 0)
+
+                fz = np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 2], 0) + \
+                     np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 2], 0)
+
+                Cfx, Cfy, Cfz = self.calculate_coefficients(fx, fy, fz)
+
+                line = "{0:5d} | {1: 8.3e} | {2: 8.3e} | {3: 8.3e} | {4: 8.3e} | {5: 8.3e} | {6: 8.3e}".format(
+                    self.ts, fx, fy, fz, Cfx, Cfy, Cfz)
+                cout.cout_wrap(line, 1)
+        else:
+            line = "{0:5s} | {1:10s} | {2:10s} | {3:10s}".format(
+                'tstep', '  fx_g', '  fy_g', '  fz_g')
+            cout.cout_wrap(line, 1)
+            for self.ts in range(self.ts_max):
+                fx = np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 0], 0) + \
+                     np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 0], 0)
+
+                fy = np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 1], 0) + \
+                     np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 1], 0)
+
+                fz = np.sum(self.data.aero.timestep_info[self.ts].inertial_steady_forces[:, 2], 0) + \
+                     np.sum(self.data.aero.timestep_info[self.ts].inertial_unsteady_forces[:, 2], 0)
+
+                line = "{0:5d} | {1: 8.3e} | {2: 8.3e} | {3: 8.3e}".format(
+                    self.ts, fx, fy, fz)
+                cout.cout_wrap(line, 1)
 
     def file_output(self):
         # assemble forces matrix

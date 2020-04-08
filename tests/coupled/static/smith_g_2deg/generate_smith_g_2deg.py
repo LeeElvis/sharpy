@@ -2,6 +2,7 @@ import h5py as h5
 import numpy as np
 import configparser
 import os
+np.set_printoptions(precision=16)
 
 import sharpy.utils.algebra as algebra
 
@@ -38,7 +39,7 @@ num_elem = num_elem_main + num_elem_main
 num_node_main = num_elem_main*(num_node_elem - 1) + 1
 num_node = num_node_main + (num_node_main - 1)
 
-m_main = 20
+m_main = 10
 
 
 def clean_test_files():
@@ -50,7 +51,7 @@ def clean_test_files():
     if os.path.isfile(aero_file_name):
         os.remove(aero_file_name)
 
-    solver_file_name = route + '/' + case_name + '.solver.txt'
+    solver_file_name = route + '/' + case_name + '.sharpy'
     if os.path.isfile(solver_file_name):
         os.remove(solver_file_name)
 
@@ -67,7 +68,7 @@ def generate_fem_file():
     y = np.zeros((num_node, ))
     z = np.zeros((num_node, ))
     # struct twist
-    structural_twist = np.zeros_like(x)
+    structural_twist = np.zeros((num_elem, num_node_elem))
     # beam number
     beam_number = np.zeros((num_elem, ), dtype=int)
     # frame of reference delta
@@ -90,7 +91,7 @@ def generate_fem_file():
     num_mass = 1
     m_base = 0.75
     j_base = 0.1
-    base_mass = np.diag([m_base, m_base, m_base, j_base, j_base, j_base])
+    base_mass = np.diag([m_base, m_base, m_base, j_base, 0.5*j_base, 0.5*j_base])
     mass = np.zeros((num_mass, 6, 6))
     mass[0, :, :] = base_mass
     elem_mass = np.zeros((num_elem,), dtype=int)
@@ -272,7 +273,7 @@ def generate_naca_camber(M=0, P=0):
 
 
 def generate_solver_file(horseshoe=False):
-    file_name = route + '/' + case_name + '.solver.txt'
+    file_name = route + '/' + case_name + '.sharpy'
     # config = configparser.ConfigParser()
     import configobj
     config = configobj.ConfigObj()
@@ -293,9 +294,9 @@ def generate_solver_file(horseshoe=False):
                                'structural_solver': 'NonLinearStatic',
                                'structural_solver_settings': {'print_info': 'off',
                                                               'max_iterations': 150,
-                                                              'num_load_steps': 20,
-                                                              'delta_curved': 1e-5,
-                                                              'min_delta': 1e-5,
+                                                              'num_load_steps': 1,
+                                                              'delta_curved': 1e-1,
+                                                              'min_delta': 1e-6,
                                                               'gravity_on': 'on',
                                                               'gravity': 9.754,
                                                               'orientation': algebra.euler2quat(np.array([0.0,
@@ -316,11 +317,12 @@ def generate_solver_file(horseshoe=False):
                                                         'alpha': alpha_rad,
                                                         'beta': beta},
                                'max_iter': 50,
-                               'n_load_steps': 1,
+                               # 'n_load_steps': 1,
                                # 'n_load_steps': 5,
-                               'tolerance': 1e-6,
+                               'tolerance': 1e-9,
                                'relaxation_factor': 0.0}
     config['WriteVariablesTime'] = {'cleanup_old_solution': 'on',
+                                    'folder': route + '/output/',
                                     'structure_variables': ['pos'],
                                     'structure_nodes': [num_node_main - 1]}
 

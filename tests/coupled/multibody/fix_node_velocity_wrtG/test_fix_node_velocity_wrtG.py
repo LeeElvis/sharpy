@@ -1,19 +1,20 @@
-import numpy as np
-import unittest
 import os
+import shutil
+import unittest
+import numpy as np
+
+import sharpy.utils.generate_cases as gc
+import sharpy.sharpy_main
+
+folder = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
 
 
 class TestFixNodeVelocitywrtG(unittest.TestCase):
     """
-    Validation of a double pendulum with a mass at each tip position
 
-    Reference case: M. Geradin and A. Cardona, "Flexible multibody dynamics : a finite element approach"
     """
-
     def setUp(self):
-        import sharpy.utils.generate_cases as gc
 
-        deg2rad = np.pi/180.
         nodes_per_elem = 3
 
         # beam1: uniform and symmetric with aerodynamic properties equal to zero
@@ -43,21 +44,19 @@ class TestFixNodeVelocitywrtG(unittest.TestCase):
         beam1.StructuralInformation.lumped_mass_inertia = np.zeros((2, 3, 3),)
         beam1.StructuralInformation.lumped_mass_position = np.zeros((2, 3),)
 
-
         # Aerodynamic information
-        #beam1.AerodynamicInformation.set_to_zero(beam1.StructuralInformation.num_node_elem, beam1.StructuralInformation.num_node, beam1.StructuralInformation.num_elem)
-        airfoil = np.zeros((1,20,2),)
-        airfoil[0,:,0] = np.linspace(0.,1.,20)
+        airfoil = np.zeros((1, 20, 2),)
+        airfoil[0, :, 0] = np.linspace(0., 1., 20)
         beam1.AerodynamicInformation.create_one_uniform_aerodynamics(
-                                            beam1.StructuralInformation,
-                                            chord = 1.,
-                                            twist = 0.,
-                                            sweep = 0.,
-                                            num_chord_panels = 4,
-                                            m_distribution = 'uniform',
-                                            elastic_axis = 0.5,
-                                            num_points_camber = 20,
-                                            airfoil = airfoil)
+            beam1.StructuralInformation,
+            chord=1.,
+            twist=0.,
+            sweep=0.,
+            num_chord_panels=4,
+            m_distribution='uniform',
+            elastic_axis=0.5,
+            num_points_camber=20,
+            airfoil=airfoil)
 
         # SOLVER CONFIGURATION
         SimInfo = gc.SimulationInformation()
@@ -66,19 +65,24 @@ class TestFixNodeVelocitywrtG(unittest.TestCase):
         SimInfo.define_uinf(np.array([0.0,1.0,0.0]), 10.)
 
         SimInfo.solvers['SHARPy']['flow'] = ['BeamLoader',
-                                'AerogridLoader',
-                                'StaticCoupled',
-                                'DynamicCoupled']
-        SimInfo.solvers['SHARPy']['case'] = 'fix_node_velocity_wrtG'
-        SimInfo.solvers['SHARPy']['route'] = os.path.dirname(os.path.realpath(__file__)) + '/'
+                                             'AerogridLoader',
+                                             'StaticCoupled',
+                                             'DynamicCoupled']
+        self.name = 'fix_node_velocity_wrtG'
+        SimInfo.solvers['SHARPy']['case'] = self.name
+        SimInfo.solvers['SHARPy']['write_screen'] = 'off'
+        SimInfo.solvers['SHARPy']['route'] = folder + '/'
         SimInfo.set_variable_all_dicts('dt', 0.1)
         SimInfo.set_variable_all_dicts('rho', 0.0)
         SimInfo.set_variable_all_dicts('velocity_field_input', SimInfo.solvers['SteadyVelocityField'])
+        SimInfo.set_variable_all_dicts('folder', folder + '/output/')
 
         SimInfo.solvers['BeamLoader']['unsteady'] = 'on'
 
         SimInfo.solvers['AerogridLoader']['unsteady'] = 'on'
         SimInfo.solvers['AerogridLoader']['mstar'] = 2
+
+        SimInfo.solvers['NonLinearStatic']['print_info'] = False
 
         SimInfo.solvers['StaticCoupled']['structural_solver'] = 'NonLinearStatic'
         SimInfo.solvers['StaticCoupled']['structural_solver_settings'] = SimInfo.solvers['NonLinearStatic']
@@ -87,6 +91,16 @@ class TestFixNodeVelocitywrtG(unittest.TestCase):
 
         SimInfo.solvers['WriteVariablesTime']['structure_nodes'] = np.array([0,  int((nnodes1-1)/2), -1], dtype = int)
         SimInfo.solvers['WriteVariablesTime']['structure_variables'] = ['pos']
+
+        SimInfo.solvers['BeamPlot']['include_FoR'] = True
+
+        SimInfo.solvers['NonLinearDynamicMultibody']['relaxation_factor'] = 0.0
+        SimInfo.solvers['NonLinearDynamicMultibody']['min_delta'] = 1e-5
+        SimInfo.solvers['NonLinearDynamicMultibody']['max_iterations'] = 200
+        SimInfo.solvers['NonLinearDynamicMultibody']['newmark_damp'] = 1e-3
+        # SimInfo.solvers['NonLinearDynamicMultibody']['gravity_on'] = 'off'
+
+        SimInfo.solvers['NonLinearDynamicMultibody']['relaxation_factor'] = 0.0
 
         SimInfo.solvers['DynamicCoupled']['structural_solver'] = 'NonLinearDynamicMultibody'
         SimInfo.solvers['DynamicCoupled']['structural_solver_settings'] = SimInfo.solvers['NonLinearDynamicMultibody']
@@ -97,7 +111,7 @@ class TestFixNodeVelocitywrtG(unittest.TestCase):
                                                                         'BeamPlot': SimInfo.solvers['BeamPlot'],
                                                                         'AerogridPlot': SimInfo.solvers['AerogridPlot']}
 
-        ntimesteps = 100
+        ntimesteps = 10
 
         SimInfo.define_num_steps(ntimesteps)
 
@@ -130,33 +144,39 @@ class TestFixNodeVelocitywrtG(unittest.TestCase):
         MB.append(MB1)
 
 
-        gc.clean_test_files(SimInfo.solvers['SHARPy']['route'], SimInfo.solvers['SHARPy']['case'])
+        gc.clean_test_files(
+            SimInfo.solvers['SHARPy']['route'],
+            SimInfo.solvers['SHARPy']['case'])
         SimInfo.generate_solver_file()
         SimInfo.generate_dyn_file(ntimesteps)
-        beam1.generate_h5_files(SimInfo.solvers['SHARPy']['route'], SimInfo.solvers['SHARPy']['case'])
-        gc.generate_multibody_file(LC, MB,SimInfo.solvers['SHARPy']['route'], SimInfo.solvers['SHARPy']['case'])
-
-
-
-    # def tearDown():
-        # pass
+        beam1.generate_h5_files(
+            SimInfo.solvers['SHARPy']['route'],
+            SimInfo.solvers['SHARPy']['case'])
+        gc.generate_multibody_file(LC,
+                                   MB,SimInfo.solvers['SHARPy']['route'],
+                                   SimInfo.solvers['SHARPy']['case'])
 
     def test_testfixnodevelocitywrtg(self):
-        import sharpy.sharpy_main
+        """
 
-        solver_path = os.path.abspath(os.path.dirname(os.path.realpath(__file__)) + '/fix_node_velocity_wrtG.solver.txt')
-        print(solver_path)
+        """
+        solver_path = folder + '/fix_node_velocity_wrtG.sharpy'
         sharpy.sharpy_main.main(['', solver_path])
 
         # read output and compare
-        output_path = os.path.dirname(solver_path) + '/output/fix_node_velocity_wrtG/WriteVariablesTime/'
+        output_path = folder + '/output/fix_node_velocity_wrtG/WriteVariablesTime/'
         pos_tip_data = np.matrix(np.genfromtxt(output_path + "struct_pos_node-1" + ".dat", delimiter=' '))
-        self.assertAlmostEqual(pos_tip_data[-1, 1], 9.999737, 4)
-        self.assertAlmostEqual(pos_tip_data[-1, 2], -0.05957746, 4)
+        self.assertAlmostEqual(pos_tip_data[-1, 1], 9.999386, 4)
+        self.assertAlmostEqual(pos_tip_data[-1, 2], -0.089333, 4)
         self.assertAlmostEqual(pos_tip_data[-1, 3], 0., 4)
 
-if __name__=='__main__':
+    def tearDown(self):
+        files_to_delete = [self.name + '.aero.h5',
+                           self.name + '.dyn.h5',
+                           self.name + '.fem.h5',
+                           self.name + '.mb.h5',
+                           self.name + '.sharpy']
+        for f in files_to_delete:
+            os.remove(folder + '/' + f)
 
-    T = TestFixNodeVelocitywrtG()
-    T.setUp()
-    T.test_testfixnodevelocitywrtg()
+        shutil.rmtree(folder + '/output/')

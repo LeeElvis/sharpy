@@ -93,12 +93,14 @@ ENV/
 *.h5
 
 # project dependant stuff
-lib/*
+lib/*.so
 output/*
 .idea
 
+# figure folders
+*figs/*
+
 *.csv
-*.png
 *.eps
 *.vtu
 
@@ -134,3 +136,8 @@ cases/linear/coupled/res/*
 figs/*
 
 tests/linear/rom/figs/
+
+\.spyproject/
+
+# sharpy extension
+*.sharpy

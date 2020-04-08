@@ -1,115 +1,103 @@
-import ctypes as ct
 import numpy as np
-import warnings
 
-import sharpy.aero.utils.mapping as mapping
 import sharpy.utils.cout_utils as cout
 import sharpy.utils.solver_interface as solver_interface
 from sharpy.utils.solver_interface import solver, BaseSolver
 import sharpy.utils.settings as settings
-import sharpy.utils.algebra as algebra
-
+import os
 
 
 @solver
 class StaticTrim(BaseSolver):
     """
-    ``StaticTrim`` class solver, inherited from ``BaseSolver``
+    The ``StaticTrim`` solver determines the longitudinal state of trim (equilibrium) for an aeroelastic system in
+    static conditions. It wraps around the desired solver to yield the state of trim of the system, in most cases
+    the :class:`~sharpy.solvers.staticcoupled.StaticCoupled` solver.
 
-    The ``StaticTrim`` solver determines the state of trim (equlibrium) for an aeroelastic system in static conditions.
+    It calculates the required angle of attack, elevator deflection and thrust required to achieve longitudinal
+    equilibrium. The output angles are shown in degrees.
 
-    Args:
-        data (ProblemData): object with problem data
-
-    Attributes:
-        settings (dict): Name-value pair of settings employed by solver.
-
-            ======================  =============  ===============================================  ==========
-            Name                    Type           Description                                      Default
-            ======================  =============  ===============================================  ==========
-            ``print_info``          ``bool``       Print solver information to terminal             ``True``
-            ``solver``              ``str``        Underlying solver for aeroelastic system choice  ``None``
-            ``max_iter``            ``int``        Maximum number of iterations                     ``100``
-            ``fz_tolerance``        ``float``      Force tolerance in the ``z`` direction           ``0.01``
-            ``fx_tolerance``        ``float``      Force tolerance in the ``x`` direction           ``0.01``
-            ``m_tolerance``         ``float``      Moment tolerance                                 ``0.01``
-            ``tail_cs_index``       ``int``        Control surface index                            ``0``
-            ``thrust_nodes``        ``list(int)``  Index of nodes that provide thrust               ``[0]``
-            ``initial_alpha``       ``float``      Initial angle of attack (radians)                ``0.0698``
-            ``initial_deflection``  ``float``      Initial control surface deflection (radians)     ``0.0174``
-            ``initial_thrust``      ``float``      Initial thrust per engine (N)                    ``0.0``
-            ``initial_angle_eps``   ``float``      Initial angular variation for algorithm          ``0.0034``
-            ``initial_thrust_eps``  ``float``      Initial thrust variation for algorithm           ``2.0``
-            ======================  =============  ===============================================  ==========
-
-        settings_types (dict): Acceptable data types for entries in ``settings``
-        settings_default (dict): Default values for the available ``settings``
-        data (ProblemData): object containing the information of the problem
-        solver (BaseSolver): solver object employed for the solution of the problem
-        n_input (int): number of inputs to vary to achieve trim
-        i_iter (int): iteration number
-        input_history (list): list of input history during iteration
-        output_history (list): list of output history during iteration
-        gradient_history (list): history of gradients during iteration
-        trimmed_values (np.array): trim configuration values
-
-    Methods:
-        trim_algorithm: algorithm to find equilibrium conditions
-
-    See Also
-        .. py:class:: sharpy.utils.solver_interface.BaseSolver
+    The results from the trimming iteration can be saved to a text file by using the `save_info` option.
     """
     solver_id = 'StaticTrim'
+    solver_classification = 'Flight Dynamics'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+
+    settings_types['print_info'] = 'bool'
+    settings_default['print_info'] = True
+    settings_description['print_info'] = 'Print info to screen'
+
+    settings_types['solver'] = 'str'
+    settings_default['solver'] = ''
+    settings_description['solver'] = 'Solver to run in trim routine'
+
+    settings_types['solver_settings'] = 'dict'
+    settings_default['solver_settings'] = dict()
+    settings_description['solver_settings'] = 'Solver settings dictionary'
+
+    settings_types['max_iter'] = 'int'
+    settings_default['max_iter'] = 100
+    settings_description['max_iter'] = 'Maximum number of iterations of trim routine'
+
+    settings_types['fz_tolerance'] = 'float'
+    settings_default['fz_tolerance'] = 0.01
+    settings_description['fz_tolerance'] = 'Tolerance in vertical force'
+
+    settings_types['fx_tolerance'] = 'float'
+    settings_default['fx_tolerance'] = 0.01
+    settings_description['fx_tolerance'] = 'Tolerance in horizontal force'
+
+    settings_types['m_tolerance'] = 'float'
+    settings_default['m_tolerance'] = 0.01
+    settings_description['m_tolerance'] = 'Tolerance in pitching moment'
+
+    settings_types['tail_cs_index'] = 'int'
+    settings_default['tail_cs_index'] = 0
+    settings_description['tail_cs_index'] = 'Index of control surfaces that move to achieve trim'
+
+    settings_types['thrust_nodes'] = 'list(int)'
+    settings_default['thrust_nodes'] = [0]
+    settings_description['thrust_nodes'] = 'Nodes at which thrust is applied'
+
+    settings_types['initial_alpha'] = 'float'
+    settings_default['initial_alpha'] = 0.
+    settings_description['initial_alpha'] = 'Initial angle of attack'
+
+    settings_types['initial_deflection'] = 'float'
+    settings_default['initial_deflection'] = 0.
+    settings_description['initial_deflection'] = 'Initial control surface deflection'
+
+    settings_types['initial_thrust'] = 'float'
+    settings_default['initial_thrust'] = 0.0
+    settings_description['initial_thrust'] = 'Initial thrust setting'
+
+    settings_types['initial_angle_eps'] = 'float'
+    settings_default['initial_angle_eps'] = 0.05
+    settings_description['initial_angle_eps'] = 'Initial change of control surface deflection'
+
+    settings_types['initial_thrust_eps'] = 'float'
+    settings_default['initial_thrust_eps'] = 2.
+    settings_description['initial_thrust_eps'] = 'Initial thrust setting change'
+
+    settings_types['relaxation_factor'] = 'float'
+    settings_default['relaxation_factor'] = 0.2
+    settings_description['relaxation_factor'] = 'Relaxation factor'
+
+    settings_types['save_info'] = 'bool'
+    settings_default['save_info'] = False
+    settings_description['save_info'] = 'Save trim results to text file'
+
+    settings_types['folder'] = 'str'
+    settings_default['folder'] = './output/'
+    settings_description['folder'] = 'Output location for trim results'
+
+    settings_table = settings.SettingsTable()
+    __doc__ += settings_table.generate(settings_types, settings_default, settings_description)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['print_info'] = 'bool'
-        self.settings_default['print_info'] = True
-
-        self.settings_types['solver'] = 'str'
-        self.settings_default['solver'] = None
-
-        self.settings_types['solver_settings'] = 'dict'
-        self.settings_default['solver_settings'] = None
-
-        self.settings_types['max_iter'] = 'int'
-        self.settings_default['max_iter'] = 100
-
-        self.settings_types['fz_tolerance'] = 'float'
-        self.settings_default['fz_tolerance'] = 0.01
-
-        self.settings_types['fx_tolerance'] = 'float'
-        self.settings_default['fx_tolerance'] = 0.01
-
-        self.settings_types['m_tolerance'] = 'float'
-        self.settings_default['m_tolerance'] = 0.01
-
-        self.settings_types['tail_cs_index'] = 'int'
-        self.settings_default['tail_cs_index'] = 0
-
-        self.settings_types['thrust_nodes'] = 'list(int)'
-        self.settings_default['thrust_nodes'] = np.array([0])
-
-        self.settings_types['initial_alpha'] = 'float'
-        self.settings_default['initial_alpha'] = 4*np.pi/180.
-
-        self.settings_types['initial_deflection'] = 'float'
-        self.settings_default['initial_deflection'] = 1*np.pi/180.
-
-        self.settings_types['initial_thrust'] = 'float'
-        self.settings_default['initial_thrust'] = 0.0
-
-        self.settings_types['initial_angle_eps'] = 'float'
-        self.settings_default['initial_angle_eps'] = 0.2*np.pi/180.
-
-        self.settings_types['initial_thrust_eps'] = 'float'
-        self.settings_default['initial_thrust_eps'] = 2.
-
-        self.settings_types['relaxation_factor'] = 'float'
-        self.settings_default['relaxation_factor'] = 0.2
-
         self.data = None
         self.settings = None
         self.solver = None
@@ -127,6 +115,8 @@ class StaticTrim(BaseSolver):
         self.gradient_history = []
         self.trimmed_values = np.zeros((3,))
 
+        self.table = None
+
     def initialise(self, data):
         self.data = data
         self.settings = data.settings[self.solver_id]
@@ -134,6 +124,14 @@ class StaticTrim(BaseSolver):
 
         self.solver = solver_interface.initialise_solver(self.settings['solver'])
         self.solver.initialise(self.data, self.settings['solver_settings'])
+
+        folder = self.settings['folder'] + '/' + self.data.settings['SHARPy']['case'] + '/statictrim/'
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        self.table = cout.TablePrinter(10, 8, ['g', 'f', 'f', 'f', 'f', 'f', 'f', 'f', 'f', 'f'],
+                                       filename=folder+'trim_iterations.txt')
+        self.table.print_header(['iter', 'alpha[deg]', 'elev[deg]', 'thrust', 'Fx', 'Fy', 'Fz', 'Mx', 'My', 'Mz'])
 
     def increase_ts(self):
         self.data.ts += 1
@@ -315,21 +313,22 @@ class StaticTrim(BaseSolver):
                                            self.output_history[self.i_iter][2])
             if all(convergence):
                 self.trimmed_values = self.input_history[self.i_iter]
+                self.table.close_file()
                 return
 
     def evaluate(self, alpha, deflection_gamma, thrust):
         if not np.isfinite(alpha):
-            1
+            import pdb; pdb.set_trace()
         if not np.isfinite(deflection_gamma):
-            1
+            import pdb; pdb.set_trace()
         if not np.isfinite(thrust):
-            1
+            import pdb; pdb.set_trace()
 
-        cout.cout_wrap('--', 2)
-        cout.cout_wrap('Trying trim: ', 2)
-        cout.cout_wrap('Alpha: ' + str(alpha*180/np.pi), 2)
-        cout.cout_wrap('CS deflection: ' + str((deflection_gamma - alpha)*180/np.pi), 2)
-        cout.cout_wrap('Thrust: ' + str(thrust), 2)
+        # cout.cout_wrap('--', 2)
+        # cout.cout_wrap('Trying trim: ', 2)
+        # cout.cout_wrap('Alpha: ' + str(alpha*180/np.pi), 2)
+        # cout.cout_wrap('CS deflection: ' + str((deflection_gamma - alpha)*180/np.pi), 2)
+        # cout.cout_wrap('Thrust: ' + str(thrust), 2)
         # modify the trim in the static_coupled solver
         self.solver.change_trim(alpha,
                                 thrust,
@@ -344,35 +343,20 @@ class StaticTrim(BaseSolver):
         forcez = forces[2]
         forcex = forces[0]
         moment = moments[1]
-        cout.cout_wrap('Forces and moments:', 2)
-        cout.cout_wrap('fx = ' + str(forces[0]) + ' mx = ' + str(moments[0]), 2)
-        cout.cout_wrap('fy = ' + str(forces[1]) + ' my = ' + str(moments[1]), 2)
-        cout.cout_wrap('fz = ' + str(forces[2]) + ' mz = ' + str(moments[2]), 2)
+        # cout.cout_wrap('Forces and moments:', 2)
+        # cout.cout_wrap('fx = ' + str(forces[0]) + ' mx = ' + str(moments[0]), 2)
+        # cout.cout_wrap('fy = ' + str(forces[1]) + ' my = ' + str(moments[1]), 2)
+        # cout.cout_wrap('fz = ' + str(forces[2]) + ' mz = ' + str(moments[2]), 2)
+
+        self.table.print_line([self.i_iter,
+                               alpha*180/np.pi,
+                               (deflection_gamma - alpha)*180/np.pi,
+                               thrust,
+                               forces[0],
+                               forces[1],
+                               forces[2],
+                               moments[0],
+                               moments[1],
+                               moments[2]])
 
         return forcez, moment, forcex
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
