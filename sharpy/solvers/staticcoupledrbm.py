@@ -8,42 +8,68 @@ import sharpy.utils.solver_interface as solver_interface
 from sharpy.utils.solver_interface import solver, BaseSolver
 import sharpy.utils.settings as settings
 import sharpy.utils.algebra as algebra
+import sharpy.utils.correct_forces as cf
 
 
 @solver
 class StaticCoupledRBM(BaseSolver):
+    """
+    Steady coupled solver including rigid body motions
+    """
+
     solver_id = 'StaticCoupledRBM'
+    solver_classification = 'coupled'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+    settings_options = dict()
+
+    settings_types['print_info'] = 'bool'
+    settings_default['print_info'] = True
+    settings_description['print_info'] = 'Output run-time information'
+
+    settings_types['structural_solver'] = 'str'
+    settings_default['structural_solver'] = None
+    settings_description['structural_solver'] = 'Name of the structural solver used in the computation'
+
+    settings_types['structural_solver_settings'] = 'dict'
+    settings_default['structural_solver_settings'] = None
+    settings_description['structural_solver_settings'] = 'Dictionary os settings needed by the structural solver'
+
+    settings_types['aero_solver'] = 'str'
+    settings_default['aero_solver'] = None
+    settings_description['aero_solver'] = 'Name of the aerodynamic solver used in the computation'
+
+    settings_types['aero_solver_settings'] = 'dict'
+    settings_default['aero_solver_settings'] = None
+    settings_description['aero_solver_settings'] = 'Dictionary os settings needed by the aerodynamic solver'
+
+    settings_types['max_iter'] = 'int'
+    settings_default['max_iter'] = 100
+    settings_description['max_iter'] = 'Maximum numeber of FSI iterations'
+
+    settings_types['n_load_steps'] = 'int'
+    settings_default['n_load_steps'] = 1
+    settings_description['n_load_steps'] = 'Number of steps to ramp up the application of loads'
+
+    settings_types['tolerance'] = 'float'
+    settings_default['tolerance'] = 1e-5
+    settings_description['tolerance'] = 'FSI tolerance'
+
+    settings_types['relaxation_factor'] = 'float'
+    settings_default['relaxation_factor'] = 0.
+    settings_description['relaxation_factor'] = 'Relaxation factor'
+
+    settings_types['correct_forces_method'] = 'str'
+    settings_default['correct_forces_method'] = ''
+    settings_description['correct_forces_method'] = 'Function used to correct aerodynamic forces. Check :py:mod:`sharpy.utils.correct_forces`'
+    settings_options['correct_forces_method'] = ['efficiency', 'polars']
+
+    settings_table = settings.SettingsTable()
+    __doc__ += settings_table.generate(settings_types, settings_default, settings_description, settings_options)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['print_info'] = 'bool'
-        self.settings_default['print_info'] = True
-
-        self.settings_types['structural_solver'] = 'str'
-        self.settings_default['structural_solver'] = None
-
-        self.settings_types['structural_solver_settings'] = 'dict'
-        self.settings_default['structural_solver_settings'] = None
-
-        self.settings_types['aero_solver'] = 'str'
-        self.settings_default['aero_solver'] = None
-
-        self.settings_types['aero_solver_settings'] = 'dict'
-        self.settings_default['aero_solver_settings'] = None
-
-        self.settings_types['max_iter'] = 'int'
-        self.settings_default['max_iter'] = 100
-
-        self.settings_types['n_load_steps'] = 'int'
-        self.settings_default['n_load_steps'] = 1
-
-        self.settings_types['tolerance'] = 'float'
-        self.settings_default['tolerance'] = 1e-5
-
-        self.settings_types['relaxation_factor'] = 'float'
-        self.settings_default['relaxation_factor'] = 0.
 
         self.data = None
         self.settings = None
@@ -52,19 +78,33 @@ class StaticCoupledRBM(BaseSolver):
 
         self.previous_force = None
 
+        self.correct_forces = False
+        self.correct_forces_function = None
+
     def initialise(self, data, input_dict=None):
         self.data = data
         if input_dict is None:
             self.settings = data.settings[self.solver_id]
         else:
             self.settings = input_dict
-        settings.to_custom_types(self.settings, self.settings_types, self.settings_default)
+        settings.to_custom_types(self.settings,
+                                 self.settings_types,
+                                 self.settings_default,
+                                 options=self.settings_options)
 
         self.structural_solver = solver_interface.initialise_solver(self.settings['structural_solver'])
         self.structural_solver.initialise(self.data, self.settings['structural_solver_settings'])
         self.aero_solver = solver_interface.initialise_solver(self.settings['aero_solver'])
         self.aero_solver.initialise(self.structural_solver.data, self.settings['aero_solver_settings'])
         self.data = self.aero_solver.data
+
+        # load info from dyn dictionary
+        self.data.structure.add_unsteady_information(self.data.structure.dyn_dict, 1)
+
+        # Define the function to correct aerodynamic forces
+        if self.settings['correct_forces_method'] is not '':
+            self.correct_forces = True
+            self.correct_forces_function = cf.dict_of_corrections[self.settings['correct_forces_method']]
 
     def increase_ts(self):
         self.data.ts += 1
@@ -87,7 +127,8 @@ class StaticCoupledRBM(BaseSolver):
     def run(self):
 
         # Include the rbm
-        self.data.structure.timestep_info[-1].for_vel = self.data.structure.dynamic_input[self.data.ts]['for_vel']
+         # print("ts", self.data.ts)
+        self.data.structure.timestep_info[-1].for_vel = self.data.structure.dynamic_input[0]['for_vel']
 
         for i_step in range(self.settings['n_load_steps'].value + 1):
             if (i_step == self.settings['n_load_steps'].value and
@@ -119,7 +160,14 @@ class StaticCoupledRBM(BaseSolver):
                     self.data.structure.timestep_info[self.data.ts].psi,
                     self.data.structure.node_master_elem,
                     self.data.structure.connectivities,
-                    self.data.structure.timestep_info[self.data.ts].cag())
+                    self.data.structure.timestep_info[self.data.ts].cag(),
+                    self.data.aero.aero_dict)
+
+                if self.correct_forces:
+                    struct_forces = self.correct_forces_function(self.data,
+                                            self.data.aero.timestep_info[self.data.ts],
+                                            self.data.structure.timestep_info[self.data.ts],
+                                            struct_forces)
 
                 if not self.settings['relaxation_factor'].value == 0.:
                     if i_iter == 0:
@@ -131,8 +179,12 @@ class StaticCoupledRBM(BaseSolver):
                     self.previous_force = temp
 
                 # copy force in beam
-                old_g = self.structural_solver.settings['gravity'].value
-                self.structural_solver.settings['gravity'] = old_g*load_step_multiplier
+                with_gravity_setting = True
+                try:
+                    old_g = self.structural_solver.settings['gravity'].value
+                    self.structural_solver.settings['gravity'] = old_g*load_step_multiplier
+                except KeyError:
+                    with_gravity_setting = False
                 temp1 = load_step_multiplier*(struct_forces + self.data.structure.ini_info.steady_applied_forces)
                 self.data.structure.timestep_info[self.data.ts].steady_applied_forces[:] = temp1
                 # run beam
@@ -140,7 +192,8 @@ class StaticCoupledRBM(BaseSolver):
                 self.data = self.structural_solver.run()
                 # The following line removes the rbm
                 self.data.structure.timestep_info[self.data.ts].quat = prev_quat.copy()
-                self.structural_solver.settings['gravity'] = ct.c_double(old_g)
+                if with_gravity_setting:
+                    self.structural_solver.settings['gravity'] = ct.c_double(old_g)
 
                 # update grid
                 self.aero_solver.update_step()

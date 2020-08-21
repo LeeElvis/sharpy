@@ -12,7 +12,7 @@ def clean_test_files():
     if os.path.isfile(fem_file_name):
         os.remove(fem_file_name)
 
-    solver_file_name = route + '/' + case_name + '.solver.txt'
+    solver_file_name = route + '/' + case_name + '.sharpy'
     if os.path.isfile(solver_file_name):
         os.remove(solver_file_name)
 
@@ -132,14 +132,14 @@ def generate_fem_file(route, case_name, num_elem, num_node_elem=3):
 
 
 def generate_solver_file():
-    file_name = route + '/' + case_name + '.solver.txt'
+    file_name = route + '/' + case_name + '.sharpy'
     # config = configparser.ConfigParser()
     import configobj
     config = configobj.ConfigObj()
     config.filename = file_name
     config['SHARPy'] = {'case': case_name,
                         'route': route,
-                        'flow': ['BeamLoader', 'NonLinearStatic', 'BeamPlot', 'WriteVariablesTime'],
+                        'flow': ['BeamLoader', 'NonLinearStatic', 'WriteVariablesTime'],
                         'write_screen': 'off',
                         'write_log': 'on',
                         'log_folder': route + '/output/',
@@ -154,8 +154,9 @@ def generate_solver_file():
                                  'gravity_on': 'on',
                                  'gravity': 9.81,
                                  'gravity_dir': ['0', '0', '1']}
-    config['WriteVariablesTime'] = {'structure_variables': ['pos'],
-                                    'cleanup_old_solution': 'on'}
+    config['WriteVariablesTime'] = {'structure_variables': ['pos', 'psi'],
+                                    'cleanup_old_solution': 'on',
+                                    'folder': route + '/output'}
     config['BeamPlot'] = {'folder': route + '/output',
                           'include_rbm': 'off',
                           'include_applied_forces': 'on'}

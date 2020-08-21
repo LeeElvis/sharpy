@@ -1,12 +1,8 @@
-# Alfonso del Carre
-# alfonso.del-carre14@imperial.ac.uk
-# Imperial College London
-# LoCA lab
-# 29 Sept 2016
+"""Aerogrid
 
-# Aerogrid contains all the necessary routines to generate an aerodynamic
-# grid based on the input dictionaries.
-
+Aerogrid contains all the necessary routines to generate an aerodynamic
+grid based on the input dictionaries.
+"""
 import ctypes as ct
 import warnings
 
@@ -20,6 +16,12 @@ import sharpy.utils.generator_interface as gen_interface
 
 
 class Aerogrid(object):
+    """
+    ``Aerogrid`` is the main object containing information of the grid of panels
+
+    It is created by the solver :class:`sharpy.solvers.aerogridloader.AerogridLoader`
+
+    """
     def __init__(self):
         self.aero_dict = None
         self.beam = None
@@ -43,6 +45,9 @@ class Aerogrid(object):
         self.n_control_surfaces = 0
 
         self.cs_generators = []
+
+        self.polars = None
+        self.wake_shape_generator = None
 
     def generate(self, aero_dict, beam, aero_settings, ts):
         self.aero_dict = aero_dict
@@ -100,6 +105,11 @@ class Aerogrid(object):
         except KeyError:
             aero_settings.update({'control_surface_deflection': ['']*self.n_control_surfaces})
 
+        # pad ctrl surfaces dict with empty strings if not defined
+        if len(aero_settings['control_surface_deflection']) != self.n_control_surfaces:
+            undef_ctrl_sfcs = ['']*(self.n_control_surfaces - len(aero_settings['control_surface_deflection']))
+            aero_settings['control_surface_deflection'].extend(undef_ctrl_sfcs)
+
         # initialise generators
         for i_cs in range(self.n_control_surfaces):
             if aero_settings['control_surface_deflection'][i_cs] == '':
@@ -108,11 +118,21 @@ class Aerogrid(object):
                 generator_type = gen_interface.generator_from_string(
                     aero_settings['control_surface_deflection'][i_cs])
                 self.cs_generators.append(generator_type())
-                self.cs_generators[i_cs].initialise(aero_settings['control_surface_deflection_generator'][str(i_cs)])
+                self.cs_generators[i_cs].initialise(
+                    aero_settings['control_surface_deflection_generator_settings'][i_cs])
 
         self.add_timestep()
         self.generate_mapping()
         self.generate_zeta(self.beam, self.aero_settings, ts)
+
+        if 'polars' in aero_dict:
+            import sharpy.aero.utils.airfoilpolars as ap
+            self.polars = []
+            nairfoils = np.amax(self.aero_dict['airfoil_distribution']) + 1
+            for iairfoil in range(nairfoils):
+                new_polar = ap.polar()
+                new_polar.initialise(aero_dict['polars'][str(iairfoil)])
+                self.polars.append(new_polar)
 
     def output_info(self):
         cout.cout_wrap('The aerodynamic grid contains %u surfaces' % self.n_surf, 1)
@@ -168,7 +188,7 @@ class Aerogrid(object):
         except IndexError:
             self.timestep_info.append(self.ini_info.copy())
 
-    def generate_zeta_timestep_info(self, structure_tstep, aero_tstep, beam, aero_settings, it=None):
+    def generate_zeta_timestep_info(self, structure_tstep, aero_tstep, beam, aero_settings, it=None, dt=None):
         if it is None:
             it = len(beam.timestep_info) - 1
         global_node_in_surface = []
@@ -229,7 +249,7 @@ class Aerogrid(object):
                 # 1) check that this node and elem have a control surface
                     if self.aero_dict['control_surface'][i_elem, i_local_node] >= 0:
                         i_control_surface = self.aero_dict['control_surface'][i_elem, i_local_node]
-                # 2) type of control surface + write info
+                        # 2) type of control surface + write info
                         control_surface_info = dict()
                         if self.aero_dict['control_surface_type'][i_control_surface] == 0:
                             control_surface_info['type'] = 'static'
@@ -252,7 +272,34 @@ class Aerogrid(object):
                                 self.cs_generators[i_control_surface](params)
 
                         elif self.aero_dict['control_surface_type'][i_control_surface] == 2:
-                            raise NotImplementedError('control-type control surfaces are not yet implemented')
+                            control_surface_info['type'] = 'controlled'
+
+                            try:
+                                old_deflection = self.data.aero.timestep_info[-1].control_surface_deflection[i_control_surface]
+                            except AttributeError:
+                                try:
+                                    old_deflection = aero_tstep.control_surface_deflection[i_control_surface]
+                                except IndexError:
+                                    old_deflection = self.aero_dict['control_surface_deflection'][i_control_surface]
+
+                            try:
+                                control_surface_info['deflection'] = aero_tstep.control_surface_deflection[i_control_surface]
+                            except IndexError:
+                                control_surface_info['deflection'] = self.aero_dict['control_surface_deflection'][i_control_surface]
+
+                            if dt is not None:
+                                control_surface_info['deflection_dot'] = (
+                                        (control_surface_info['deflection'] - old_deflection)/dt)
+                            else:
+                                control_surface_info['deflection_dot'] = 0.0
+
+                            control_surface_info['chord'] = self.aero_dict['control_surface_chord'][i_control_surface]
+
+                            try:
+                                control_surface_info['hinge_coords'] = self.aero_dict['control_surface_hinge_coords'][i_control_surface]
+                            except KeyError:
+                                control_surface_info['hinge_coords'] = None
+
                         else:
                             raise NotImplementedError(str(self.aero_dict['control_surface_type'][i_control_surface]) +
                                 ' control surfaces are not yet implemented')
@@ -278,6 +325,9 @@ class Aerogrid(object):
                 node_info['elem'] = beam.elements[i_elem]
                 node_info['for_pos'] = structure_tstep.for_pos
                 node_info['cga'] = structure_tstep.cga()
+                if node_info['M_distribution'].lower() == 'user_defined':
+                    ielem_in_surf = i_elem - np.sum(self.surface_distribution < i_surf)
+                    node_info['user_defined_m_distribution'] = self.aero_dict['user_defined_m_distribution'][str(i_surf)][:, ielem_in_surf, i_local_node]
                 (aero_tstep.zeta[i_surf][:, :, i_n],
                  aero_tstep.zeta_dot[i_surf][:, :, i_n]) = (
                     generate_strip(node_info,
@@ -417,13 +467,8 @@ class Aerogrid(object):
 
 def generate_strip(node_info, airfoil_db, aligned_grid, orientation_in=np.array([1, 0, 0]), calculate_zeta_dot = False):
     """
-    Returns a strip in "a" frame of reference, it has to be then rotated to
+    Returns a strip of panels in ``A`` frame of reference, it has to be then rotated to
     simulate angles of attack, etc
-    :param node_info:
-    :param airfoil_db:
-    :param aligned_grid:
-    :param orientation_in:
-    :return:
     """
     strip_coordinates_a_frame = np.zeros((3, node_info['M'] + 1), dtype=ct.c_double)
     strip_coordinates_b_frame = np.zeros((3, node_info['M'] + 1), dtype=ct.c_double)
@@ -437,6 +482,10 @@ def generate_strip(node_info, airfoil_db, aligned_grid, orientation_in=np.array(
     elif node_info['M_distribution'] == '1-cos':
         domain = np.linspace(0, 1.0, node_info['M'] + 1)
         strip_coordinates_b_frame[1, :] = 0.5*(1.0 - np.cos(domain*np.pi))
+    elif node_info['M_distribution'].lower() == 'user_defined':
+        # strip_coordinates_b_frame[1, :-1] = np.linspace(0.0, 1.0 - node_info['last_panel_length'], node_info['M'])
+        # strip_coordinates_b_frame[1,-1] = 1.
+        strip_coordinates_b_frame[1,:] = node_info['user_defined_m_distribution']
     else:
         raise NotImplemented('M_distribution is ' + node_info['M_distribution'] +
                              ' and it is not yet supported')
@@ -492,10 +541,10 @@ def generate_strip(node_info, airfoil_db, aligned_grid, orientation_in=np.array(
     Cab = algebra.crv2rotation(node_info['beam_psi'])
 
     rot_angle = algebra.angle_between_vectors_sign(orientation_in, Cab[:, 1], Cab[:, 2])
-    if np.sign(np.dot(orientation_in, Cab[:, 1])) > 0:
-        rot_angle = 0.0
+    if np.sign(np.dot(orientation_in, Cab[:, 1])) >= 0:
+        rot_angle += 0.0
     else:
-        rot_angle = -np.pi
+        rot_angle += -2*np.pi
     Crot = algebra.rotation3d_z(-rot_angle)
 
     c_sweep = np.eye(3)
@@ -544,7 +593,7 @@ def generate_strip(node_info, airfoil_db, aligned_grid, orientation_in=np.array(
         for i_M in range(node_info['M'] + 1):
                 strip_coordinates_a_frame[:, i_M] += 0.25*delta_c
     else:
-        warnings.warn("No quarter chord disp of grid for non 1-cos grid distributions implemented", UserWarning)
+        warnings.warn("No quarter chord disp of grid for non-uniform grid distributions implemented", UserWarning)
 
     # rotation from a to g
     for i_M in range(node_info['M'] + 1):

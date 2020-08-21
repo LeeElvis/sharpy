@@ -1,43 +1,14 @@
 SHARPy Solvers
 ------------------
 
-``SHARPy`` has the following solvers available for use:
+The available SHARPy solvers are listed below. Attending to SHARPy's modular structure, they can be run
+independently so the order in which you desire to run them is important.
 
-
-IO of Models
-++++++++++++
-
-.. toctree::
-    solvers/aerogrid
-    solvers/beamloader
-
-
-Structural Solvers
-++++++++++++++++++
-
-Aerodynamic Solvers
-+++++++++++++++++++
+The starting point is the PreSharpy loader. It contains the simulation configuration and which solvers are to be run
+and in the order that should happen.
 
 .. toctree::
-    solvers/steplinearUVLM
-    solvers/stepUVLM
+    :glob:
 
-
-Aeroelastic Solvers
-+++++++++++++++++++
-.. toctree::
-    aeroelastics/dyncoupled
-    aeroelastics/lin_aeroelastic
-
-
-Modal Solvers
-+++++++++++++
-
-.. autoclass:: sharpy.solvers.modal.Modal
-    :members:
-
-Flight Solvers
-++++++++++++++
-.. autoclass:: sharpy.solvers.statictrim.StaticTrim
-    :members:
+    ../includes/solvers/*
 

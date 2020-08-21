@@ -9,46 +9,68 @@ from sharpy.utils.settings import str2bool
 from sharpy.utils.solver_interface import solver, BaseSolver
 import sharpy.utils.settings as settings
 import sharpy.aero.utils.uvlmlib as uvlmlib
+from sharpy.utils.constants import vortex_radius_def
 
 
 @solver
 class AerogridPlot(BaseSolver):
+    """
+    Aerodynamic Grid Plotter
+
+    """
     solver_id = 'AerogridPlot'
+    solver_classification = 'post-processor'
+
+    settings_types = dict()
+    settings_default = dict()
+    settings_description = dict()
+
+    settings_types['folder'] = 'str'
+    settings_default['folder'] = './output'
+    settings_description['folder'] = 'Output folder'
+
+    settings_types['include_rbm'] = 'bool'
+    settings_default['include_rbm'] = True
+
+    settings_types['include_forward_motion'] = 'bool'
+    settings_default['include_forward_motion'] = False
+
+    settings_types['include_applied_forces'] = 'bool'
+    settings_default['include_applied_forces'] = True
+
+    settings_types['include_unsteady_applied_forces'] = 'bool'
+    settings_default['include_unsteady_applied_forces'] = False
+
+    settings_types['minus_m_star'] = 'int'
+    settings_default['minus_m_star'] = 0
+
+    settings_types['name_prefix'] = 'str'
+    settings_default['name_prefix'] = ''
+    settings_description['name_prefix'] = 'Prefix to add to file name'
+
+    settings_types['u_inf'] = 'float'
+    settings_default['u_inf'] = 0.
+
+    settings_types['dt'] = 'float'
+    settings_default['dt'] = 0.
+
+    settings_types['include_velocities'] = 'bool'
+    settings_default['include_velocities'] = False
+
+    settings_types['include_incidence_angle'] = 'bool'
+    settings_default['include_incidence_angle'] = False
+
+    settings_types['num_cores'] = 'int'
+    settings_default['num_cores'] = 1
+
+    settings_types['vortex_radius'] = 'float'
+    settings_default['vortex_radius'] = vortex_radius_def
+    settings_description['vortex_radius'] = 'Distance below which inductions are not computed'
+
+    table = settings.SettingsTable()
+    __doc__ += table.generate(settings_types, settings_default, settings_description)
 
     def __init__(self):
-        self.settings_types = dict()
-        self.settings_default = dict()
-
-        self.settings_types['folder'] = 'str'
-        self.settings_default['folder'] = './output'
-
-        self.settings_types['include_rbm'] = 'bool'
-        self.settings_default['include_rbm'] = True
-
-        self.settings_types['include_forward_motion'] = 'bool'
-        self.settings_default['include_forward_motion'] = False
-
-        self.settings_types['include_applied_forces'] = 'bool'
-        self.settings_default['include_applied_forces'] = True
-
-        self.settings_types['include_unsteady_applied_forces'] = 'bool'
-        self.settings_default['include_unsteady_applied_forces'] = False
-
-        self.settings_types['minus_m_star'] = 'int'
-        self.settings_default['minus_m_star'] = 0
-
-        self.settings_types['name_prefix'] = 'str'
-        self.settings_default['name_prefix'] = ''
-
-        self.settings_types['u_inf'] = 'float'
-        self.settings_default['u_inf'] = 0.
-
-        self.settings_types['dt'] = 'float'
-        self.settings_default['dt'] = 0.
-
-        self.settings_types['include_velocities'] = 'bool'
-        self.settings_default['include_velocities'] = False
-
         self.settings = None
         self.data = None
 
@@ -96,13 +118,26 @@ class AerogridPlot(BaseSolver):
         return self.data
 
     def plot_body(self):
-        for i_surf in range(self.data.aero.timestep_info[self.ts].n_surf):
+
+        aero_tstep = self.data.aero.timestep_info[self.ts]
+        struct_tstep = self.data.structure.timestep_info[self.ts]
+
+        if self.settings['include_incidence_angle']:
+            aero_tstep.postproc_cell['incidence_angle'] = []
+            for isurf in range(aero_tstep.n_surf):
+                aero_tstep.postproc_cell['incidence_angle'].append(
+                               np.zeros_like(aero_tstep.gamma[isurf]))
+
+            uvlmlib.uvlm_calculate_incidence_angle(aero_tstep,
+                                                   struct_tstep)
+
+        for i_surf in range(aero_tstep.n_surf):
             filename = (self.body_filename +
                         '_' +
                         '%02u_' % i_surf +
                         '%06u' % self.ts)
 
-            dims = self.data.aero.timestep_info[self.ts].dimensions[i_surf, :]
+            dims = aero_tstep.dimensions[i_surf, :]
             point_data_dim = (dims[0]+1)*(dims[1]+1)  # + (dims_star[0]+1)*(dims_star[1]+1)
             panel_data_dim = (dims[0])*(dims[1])  # + (dims_star[0])*(dims_star[1])
 
@@ -126,18 +161,13 @@ class AerogridPlot(BaseSolver):
             for i_n in range(dims[1]+1):
                 for i_m in range(dims[0]+1):
                     counter += 1
-                    coords[counter, :] = self.data.aero.timestep_info[self.ts].zeta[i_surf][:, i_m, i_n]
+                    coords[counter, :] = aero_tstep.zeta[i_surf][:, i_m, i_n]
                     if self.settings['include_rbm']:
-                        coords[counter, :] += self.data.structure.timestep_info[self.ts].for_pos[0:3]
+                        coords[counter, :] += struct_tstep.for_pos[0:3]
                     if self.settings['include_forward_motion']:
                         coords[counter, 0] -= self.settings['dt'].value*self.ts*self.settings['u_inf'].value
 
-            with_incidence_angle = True
-            try:
-                self.data.aero.timestep_info[self.ts].postproc_cell['incidence_angle']
-            except KeyError:
-                with_incidence_angle = False
-            else:
+            if self.settings['include_incidence_angle']:
                 incidence_angle = np.zeros_like(panel_gamma)
 
             counter = -1
@@ -148,21 +178,19 @@ class AerogridPlot(BaseSolver):
                     node_counter += 1
                     # point data
                     point_struct_id[node_counter] = global_counter
-                    point_cf[node_counter, :] = self.data.aero.timestep_info[self.ts].forces[i_surf][0:3, i_m, i_n]
+                    point_cf[node_counter, :] = aero_tstep.forces[i_surf][0:3, i_m, i_n]
                     try:
-                        point_unsteady_cf[node_counter, :] = self.data.aero.timestep_info[self.ts].dynamic_forces[i_surf][0:3, i_m, i_n]
+                        point_unsteady_cf[node_counter, :] = aero_tstep.dynamic_forces[i_surf][0:3, i_m, i_n]
                     except AttributeError:
                         pass
                     try:
-                        zeta_dot[node_counter, :] = self.data.aero.timestep_info[self.ts].zeta_dot[i_surf][0:3, i_m, i_n]
+                        zeta_dot[node_counter, :] = aero_tstep.zeta_dot[i_surf][0:3, i_m, i_n]
                     except AttributeError:
                         pass
                     try:
-                        u_inf[node_counter, :] = self.data.aero.timestep_info[self.ts].u_ext[i_surf][0:3, i_m, i_n]
+                        u_inf[node_counter, :] = aero_tstep.u_ext[i_surf][0:3, i_m, i_n]
                     except AttributeError:
                         pass
-                    if self.settings['include_velocities']:
-                        vel[node_counter, :] = uvlmlib.uvlm_calculate_total_induced_velocity_at_point(self.data.aero.timestep_info[self.ts],coords[node_counter, :])
                     if i_n < dims[1] and i_m < dims[0]:
                         counter += 1
                     else:
@@ -173,16 +201,22 @@ class AerogridPlot(BaseSolver):
                                  node_counter + dims[0]+2,
                                  node_counter + dims[0]+1])
                     # cell data
-                    normal[counter, :] = self.data.aero.timestep_info[self.ts].normals[i_surf][:, i_m, i_n]
+                    normal[counter, :] = aero_tstep.normals[i_surf][:, i_m, i_n]
                     panel_id[counter] = counter
                     panel_surf_id[counter] = i_surf
-                    panel_gamma[counter] = self.data.aero.timestep_info[self.ts].gamma[i_surf][i_m, i_n]
-                    panel_gamma_dot[counter] = self.data.aero.timestep_info[self.ts].gamma_dot[i_surf][i_m, i_n]
+                    panel_gamma[counter] = aero_tstep.gamma[i_surf][i_m, i_n]
+                    panel_gamma_dot[counter] = aero_tstep.gamma_dot[i_surf][i_m, i_n]
 
-                    if with_incidence_angle:
+                    if self.settings['include_incidence_angle']:
                         incidence_angle[counter] = \
-                            self.data.aero.timestep_info[self.ts].postproc_cell['incidence_angle'][i_surf][i_m, i_n]
+                            aero_tstep.postproc_cell['incidence_angle'][i_surf][i_m, i_n]
 
+            if self.settings['include_velocities']:
+                vel = uvlmlib.uvlm_calculate_total_induced_velocity_at_points(aero_tstep,
+                                                                              coords,
+                                                                              self.settings['vortex_radius'],
+                                                                              struct_tstep.for_pos,
+                                                                              self.settings['numcores'])
 
             ug = tvtk.UnstructuredGrid(points=coords)
             ug.set_cells(tvtk.Quad().cell_type, conn)
@@ -194,7 +228,7 @@ class AerogridPlot(BaseSolver):
             ug.cell_data.get_array(2).name = 'panel_gamma'
             ug.cell_data.add_array(panel_gamma_dot)
             ug.cell_data.get_array(3).name = 'panel_gamma_dot'
-            if with_incidence_angle:
+            if self.settings['include_incidence_angle']:
                 ug.cell_data.add_array(incidence_angle)
                 ug.cell_data.get_array(4).name = 'incidence_angle'
             ug.cell_data.vectors = normal
@@ -223,7 +257,7 @@ class AerogridPlot(BaseSolver):
                         '%02u_' % i_surf +
                         '%06u' % self.ts)
 
-            dims_star = self.data.aero.timestep_info[self.ts].dimensions_star[i_surf, :]
+            dims_star = self.data.aero.timestep_info[self.ts].dimensions_star[i_surf, :].copy()
             dims_star[0] -= self.settings['minus_m_star']
 
             point_data_dim = (dims_star[0]+1)*(dims_star[1]+1)
